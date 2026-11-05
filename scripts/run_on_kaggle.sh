@@ -11,7 +11,7 @@
 
 set -euo pipefail
 
-KERNEL="${KERNEL:-gshjis/sasrec-training}"
+KERNEL="${KERNEL:-gshjis/sasrec-training-yambda-3m-test-run}"
 KERNEL_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)/kaggle"
 OUTPUT_DIR="${OUTPUT_DIR:-./kaggle_output}"
 
