@@ -1,0 +1,38 @@
+# Virtual environment
+.venv/
+venv/
+env/
+
+# Data (large parquet files — downloaded at runtime)
+data/raw/
+data/processed/
+data/*.parquet
+data/*.csv
+
+# Logs
+logs/
+*.log
+
+# Python caches
+__pycache__/
+*.py[cod]
+*$py.class
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+
+# IDE / editor
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Project-specific caches
+.codebase-memory/
+.cortexkit/
+

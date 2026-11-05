@@ -1,0 +1,159 @@
+from __future__ import annotations
+
+from dataclasses import dataclass
+
+import polars as pl
+
+
+@dataclass(frozen=True)
+class BuildSessionsConfig:
+    """Конфигурация построения сессий по правому хвосту логнормального распределения gap."""
+
+    gap_std_threshold: float = 2.0  # число стандартных отклонений в лог-пространстве
+    min_played_ratio_pct: float = (
+        50.0  # фильтр прослушиваний (оставляем >= этого значения)
+    )
+    min_session_len: int = 10  # минимум событий в сессии
+    remove_time_outliers: bool = (
+        True  # удалять сессии длиннее верхнего уса боксплота по времени
+    )
+    time_outlier_multiplier: float = (
+        1.5  # множитель IQR для верхнего уса (1.5 = стандартный боксплот)
+    )
+    uid_column: str = "uid"
+    timestamp_column: str = "timestamp"
+    played_ratio_column: str = "played_ratio_pct"
+    session_column: str = "session_id"
+
+
+def build_sessions(
+    dataset: pl.DataFrame,
+    config: BuildSessionsConfig | None = None,
+) -> pl.DataFrame:
+    """
+    Построить сессии по правому хвосту логнормального распределения gap.
+
+    Логика:
+      1. Оставить события с played_ratio_pct >= min_played_ratio_pct.
+      2. Отсортировать по (uid, timestamp).
+      3. Вычислить gap_seconds = timestamp - предыдущий timestamp того же uid.
+      4. Для каждого пользователя взять log(gap_seconds), вычислить mean и std.
+      5. Порог в оригинальной шкале: exp(mean_log + gap_std_threshold * std_log).
+      6. Новая сессия, если gap_seconds null (первое событие) или gap_seconds > порога.
+      7. session_id через cumsum по uid.
+      8. Отбросить сессии короче min_session_len.
+      9. Удалить выборочные сессии по времени (длительность > верхний ус боксплота).
+
+    Возвращает DataFrame с добавленной колонкой session_id (Int32).
+    """
+    config = config or BuildSessionsConfig()
+    uid = config.uid_column
+    ts = config.timestamp_column
+
+    df = dataset.clone()
+
+    # 1. Фильтр по качеству прослушивания.
+    df = df.filter(pl.col(config.played_ratio_column) >= config.min_played_ratio_pct)
+
+    # 2. Сортировка по пользователю и времени — критично для корректного diff().
+    df = df.sort([uid, ts])
+
+    # 3. Разрыв между соседними событиями одного пользователя.
+    df = df.with_columns(pl.col(ts).diff().over(uid).alias("gap_seconds"))
+
+    # 4. Логарифм разрыва (только для положительных gap, иначе log не определен).
+    df = df.with_columns(
+        pl.when(pl.col("gap_seconds") > 0)
+        .then(pl.col("gap_seconds").log())
+        .otherwise(None)
+        .alias("log_gap")
+    )
+
+    # 5. Среднее и стандартное отклонение лог-разрывов по пользователю.
+    user_stats = df.group_by(uid).agg(
+        [
+            pl.col("log_gap").mean().alias("mean_log_gap"),
+            pl.col("log_gap").std().alias("std_log_gap"),
+        ]
+    )
+
+    # 6. Порог в оригинальной шкале: exp(mean_log + k * std_log) — правое хвостовое
+    #    значение логнормального распределения.
+    df = df.join(user_stats, on=uid, how="left")
+    df = df.with_columns(
+        (pl.col("mean_log_gap") + config.gap_std_threshold * pl.col("std_log_gap"))
+        .exp()
+        .alias("gap_threshold")
+    )
+
+    # 7. Признак новой сессии: первое событие пользователя или разрыв в правом хвосте.
+    df = df.with_columns(
+        (
+            pl.col("gap_seconds").is_null()
+            | (pl.col("gap_seconds") > pl.col("gap_threshold"))
+        )
+        .fill_null(False)
+        .alias("is_new_session")
+    )
+
+    # 8. session_id через накопленную сумму по uid.
+    df = df.with_columns(
+        pl.col("is_new_session")
+        .cast(pl.Int32)
+        .cum_sum()
+        .over(uid)
+        .alias(config.session_column)
+    )
+
+    # 9. Убираем служебные колонки.
+    df = df.drop(
+        [
+            "gap_seconds",
+            "log_gap",
+            "mean_log_gap",
+            "std_log_gap",
+            "gap_threshold",
+            "is_new_session",
+        ]
+    )
+
+    # 10. Отбрасываем слишком короткие сессии.
+    if config.min_session_len > 1:
+        session_lens = df.group_by([uid, config.session_column]).agg(
+            pl.len().alias("session_len")
+        )
+        valid_sessions = session_lens.filter(
+            pl.col("session_len") >= config.min_session_len
+        )
+        df = df.join(valid_sessions, on=[uid, config.session_column], how="inner")
+        # Убираем служебную колонку session_len, привезённую джойном.
+        if "session_len" in df.columns:
+            df = df.drop("session_len")
+
+    # 11. Удаление выбросов по времени (сессии длиннее верхнего уса боксплота).
+    if config.remove_time_outliers:
+        session_durations = (
+            df.group_by([uid, config.session_column])
+            .agg(
+                [
+                    pl.col(ts).min().alias("t_start"),
+                    pl.col(ts).max().alias("t_end"),
+                ]
+            )
+            .with_columns(
+                (pl.col("t_end") - pl.col("t_start")).alias("duration_sec")  # type: ignore[operator]
+            )
+        )
+
+        q1 = session_durations["duration_sec"].quantile(0.25)
+        q3 = session_durations["duration_sec"].quantile(0.75)
+        iqr = q3 - q1  # type: ignore[operator]
+        upper_whisker = q3 + config.time_outlier_multiplier * iqr  # type: ignore[operator]
+
+        valid_durations = session_durations.filter(
+            pl.col("duration_sec") <= upper_whisker
+        ).select([uid, config.session_column])
+
+        df = df.join(valid_durations, on=[uid, config.session_column], how="inner")
+
+    return df.sort([uid, config.session_column, ts])
