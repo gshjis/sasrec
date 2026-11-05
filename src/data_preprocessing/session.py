@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import random
 from dataclasses import dataclass
 
 import polars as pl
@@ -11,13 +12,14 @@ class BuildSessionsConfig:
 
     gap_std_threshold: float = 2.0
     min_played_ratio_pct: float = 50
-    min_session_len: int = 10 
-    remove_time_outliers: bool = True 
+    min_session_len: int = 10
+    remove_time_outliers: bool = True
     time_outlier_multiplier: float = 1.5
     uid_column: str = "uid"
     timestamp_column: str = "timestamp"
     played_ratio_column: str = "played_ratio_pct"
     session_column: str = "session_id"
+    seed: int = 42
 
 
 def build_sessions(
@@ -30,12 +32,29 @@ def build_sessions(
     uid = config.uid_column
     ts = config.timestamp_column
 
+    # Фиксируем сид для воспроизводимости случайных операций в Polars
+    random.seed(config.seed)
+
+    # Пустой вход — возвращаем пустой результат с колонкой session_id
+    if dataset.is_empty():
+        empty = dataset.clone()
+        if config.session_column not in empty.columns:
+            empty = empty.with_columns(
+                pl.lit(0).cast(pl.Int32).alias(config.session_column)
+            )
+        return empty
+
     df = dataset.clone()
 
     if listen_plus:
         df = df.filter(
             pl.col(config.played_ratio_column) >= config.min_played_ratio_pct
         )
+    if df.is_empty():
+        empty = df.with_columns(
+            pl.lit(0).cast(pl.Int32).alias(config.session_column)
+        )
+        return empty
     df = df.sort([uid, ts])
     df = df.with_columns(pl.col(ts).diff().over(uid).alias("gap_seconds"))
     df = df.with_columns(
@@ -91,6 +110,9 @@ def build_sessions(
         df = df.join(valid_sessions, on=[uid, config.session_column], how="inner")
         if "session_len" in df.columns:
             df = df.drop("session_len")
+
+    if df.is_empty():
+        return df
 
     if config.remove_time_outliers:
         session_durations = (

@@ -19,6 +19,10 @@ packages = [
     {include = "models", from = "src"},
     {include = "data_preprocessing", from = "src"},
     {include = "data_extractor", from = "src"},
+    {include = "paths", from = "src"},
+    {include = "config", from = "src"},
+    {include = "run_meta", from = "src"},
+    {include = "checkpoint", from = "src"},
 ]
 
 [tool.pyright]

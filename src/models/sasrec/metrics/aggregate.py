@@ -91,9 +91,9 @@ class MetricsAggregator:
         res["entropy"] = self.entropy / n
         for k in self.ks:
             res[f"coverage@{k}"] = len(self.covered[k]) / max(self.num_items - 1, 1)
-            res[f"pareto_coverage@{k}"] = len(self.covered[k]) / max(
-                self.num_items - 1, 1
-            )
+            res[f"pareto_coverage@{k}"] = len(
+                self.pareto_head_covered[k] | self.pareto_tail_covered[k]
+            ) / max(len(self.pareto_head) + len(self.pareto_tail), 1)
             res[f"pareto_head_coverage@{k}"] = len(self.pareto_head_covered[k]) / max(
                 len(self.pareto_head), 1
             )
