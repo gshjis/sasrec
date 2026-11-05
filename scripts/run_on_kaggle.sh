@@ -1,29 +1,28 @@
 #!/usr/bin/env bash
-# Скрипт для запуска проекта на Kaggle ядре через Kaggle CLI.
+# Запуск пробного прогона (3 млн взаимодействий, 5 эпох) в ядре Kaggle.
 #
-# Предварительно:
-#   1. Установите kaggle CLI: pip install kaggle
-#   2. Настройте API ключ: ~/.kaggle/kaggle.json (от https://www.kaggle.com/account)
-#   3. Создайте ядро на Kaggle (или используйте существующее)
-#   4. Замените <USER> и <KERNEL_SLUG> в kaggle-metadata.json
+# Подготовка:
+#   1. pip install kaggle
+#   2. Положите API-токен в ~/.kaggle/kaggle.json
+#      (Kaggle -> Settings -> API -> Create New Token)
+#
+# Запуск:
+#   bash scripts/run_on_kaggle.sh
 
 set -euo pipefail
 
-KERNEL_SLUG="${KERNEL_SLUG:-informatica-sasrec-training}"
-KAGGLE_USERNAME="${KAGGLE_USERNAME:-<USER>}"
+KERNEL="${KERNEL:-gshjis/sasrec-training}"
+KERNEL_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)/kaggle"
+OUTPUT_DIR="${OUTPUT_DIR:-./kaggle_output}"
 
-echo "=== Kaggle CLI run: $KERNEL_SLUG ==="
+echo "=== 1/3. Push ядра $KERNEL ==="
+kaggle kernels push -p "$KERNEL_DIR"
 
-# 1. Пушим код на ядро Kaggle (с GPU, ядро запустится автоматически)
-echo "[1/3] Push kernel to Kaggle..."
-kaggle kernels push -p . -u "$KAGGLE_USERNAME" --accelerator NvidiaTeslaT4
+echo "=== 2/3. Статус ядра ==="
+kaggle kernels status "$KERNEL"
 
-# 2. Ждём завершения и получаем статус
-echo "[2/3] Kernel pushed. Monitor at: https://www.kaggle.com/code/$KAGGLE_USERNAME/$KERNEL_SLUG"
-echo "Wait for completion, then check output."
+echo "=== 3/3. Скачивание результатов в $OUTPUT_DIR ==="
+mkdir -p "$OUTPUT_DIR"
+kaggle kernels output "$KERNEL" -p "$OUTPUT_DIR"
 
-# 3. Вытянуть результаты (логи, метрики)
-echo "[3/3] Pull results..."
-kaggle kernels pull "$KAGGLE_USERNAME/$KERNEL_SLUG" -p ./kaggle_output
-
-echo "=== Done ==="
+echo "Готово. Логи: $OUTPUT_DIR"

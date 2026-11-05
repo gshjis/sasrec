@@ -446,21 +446,19 @@ def main() -> None:
         val_tokenized.height,
     )
 
-    # Частоты айтемов для logQ (в терминах token_id)
-    item_freq = None
-    if args.logQ:
-        # Считаем частоты на оригинальном train_df (до токенизации)
-        raw_item_freq = (
-            train_df.group_by("item_id")
-            .agg(pl.len().alias("cnt"))
-            .with_columns((pl.col("cnt") / train_df.height).alias("freq"))
-        )
-        item_freq = {}
-        for row in raw_item_freq.iter_rows(named=True):
-            item_id = int(row["item_id"])
-            token_id = tokenizer.item_to_token.get(item_id)
-            if token_id is not None:
-                item_freq[token_id] = float(row["freq"])
+    # Частоты айтемов (в терминах token_id):
+    # нужны для logQ коррекции при обучении и для стратификации метрик при валидации
+    raw_item_freq = (
+        train_df.group_by("item_id")
+        .agg(pl.len().alias("cnt"))
+        .with_columns((pl.col("cnt") / train_df.height).alias("freq"))
+    )
+    item_freq: dict[int, float] = {}
+    for row in raw_item_freq.iter_rows(named=True):
+        item_id = int(row["item_id"])
+        token_id = tokenizer.item_to_token.get(item_id)
+        if token_id is not None:
+            item_freq[token_id] = float(row["freq"])
 
     # Даталоадеры
     bf = NextItemBatchFormation(
@@ -473,14 +471,14 @@ def main() -> None:
         parquet_path=str(train_tokenized_path),
         session_column="session_id",
         user_column="uid",
-        item_column="token_id",
+        item_column="item_id",
         sort_column="timestamp",
     )
     val_loader = bf.create_dataloader(
         parquet_path=str(val_tokenized_path),
         session_column="session_id",
         user_column="uid",
-        item_column="token_id",
+        item_column="item_id",
         sort_column="timestamp",
         shuffle=False,
     )

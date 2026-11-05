@@ -1,6 +1,6 @@
 {
-  "id": "informatica-sasrec-training",
-  "title": "SASRec Next-Item Training (Yambda 50m)",
+  "id": "gshjis/sasrec-training",
+  "title": "SASRec training (Yambda 3M test run)",
   "code_file": "kaggle_entry.py",
   "language": "python",
   "kernel_type": "script",

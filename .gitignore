@@ -13,6 +13,9 @@ data/*.csv
 logs/
 *.log
 
+# Kaggle CLI output
+kaggle_output/
+
 # Python caches
 __pycache__/
 *.py[cod]
