@@ -1,3 +1,4 @@
+from .aggregate import MetricsAggregator
 from .coverage import compute_strata, coverage_at_k, targets_to_strata_tensor
 from .distribution import entropy_from_logits
 from .ranking import (
@@ -9,6 +10,7 @@ from .ranking import (
 )
 
 __all__ = [
+    "MetricsAggregator",
     "compute_strata",
     "coverage_at_k",
     "entropy_from_logits",

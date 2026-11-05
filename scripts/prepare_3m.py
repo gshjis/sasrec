@@ -50,8 +50,8 @@ def main() -> None:
     # и отбираем всё до него (сортировка уже после отбора).
     print(f"Поиск границы для первых {args.interactions:,} событий по времени ...")
     ts_sorted = pl.read_parquet(args.raw, columns=["timestamp"])["timestamp"].sort()
-    if args.interactions >= ts_sorted.len():
-        threshold = ts_sorted.max()
+    if args.interactions <= 0 or args.interactions >= ts_sorted.len():
+        threshold = ts_sorted.max()  # 0 или больше строк, чем есть = все данные
     else:
         threshold = ts_sorted.gather(args.interactions - 1)
 
@@ -60,8 +60,9 @@ def main() -> None:
         .filter(pl.col("timestamp") <= threshold)  # type: ignore[operator]
         .sort("timestamp")
         .collect()
-        .head(args.interactions)
     )
+    if args.interactions > 0:
+        dataset = dataset.head(args.interactions)
     print(f"Взято взаимодействий по времени: {dataset.height:,}")
 
     ts = dataset["timestamp"]
@@ -82,8 +83,8 @@ def main() -> None:
     )
 
     session_cfg = BuildSessionsConfig()
-    train_sessions = build_sessions(train, session_cfg)
-    val_sessions = build_sessions(val, session_cfg)
+    train_sessions = build_sessions(train, config=session_cfg)
+    val_sessions = build_sessions(val, config=session_cfg)
 
     out_dir = Path(args.out)
     out_dir.mkdir(parents=True, exist_ok=True)

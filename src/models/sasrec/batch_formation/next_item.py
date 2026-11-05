@@ -49,8 +49,6 @@ class _NextItemSeqDataset(Dataset):
             self._session_index[(uid, sid)] = (start, end)
             self._session_keys.append((uid, sid))
 
-        # Колонки айтемов и времени читаются с диска ОДИН раз и остаются
-        # в memory-mapped таблице: срез берётся без повторного чтения parquet.
         self._columns = pq.read_table(
             self.parquet_path,
             columns=[item_column, sort_column],

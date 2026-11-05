@@ -23,7 +23,7 @@ REPO_DIR = Path("/kaggle/working/repo")
 WORK_DIR = Path("/kaggle/working")
 DATA_DIR = WORK_DIR / "data"
 RAW_DIR = DATA_DIR / "raw"
-INTERACTIONS = 3_000_000
+INTERACTIONS = 0  # 0 = все доступные взаимодействия (полный прогон)
 EPOCHS = 5
 
 
@@ -84,7 +84,7 @@ def main() -> None:
     train_parquet = DATA_DIR / "processed" / "train_3m.parquet"
     val_parquet = DATA_DIR / "processed" / "val_3m.parquet"
     if not (train_parquet.exists() and val_parquet.exists()):
-        print(f"[STEP] Подготовка {INTERACTIONS:,} взаимодействий...", flush=True)
+        print("[STEP] Подготовка данных (все взаимодействия)...", flush=True)
         run(
             [
                 sys.executable,

@@ -16,13 +16,7 @@ from data_extractor.config import HfConfig
 from data_extractor.hf_loader import HfYambdaLoader
 from data_preprocessing.tokenizer import Tokenizer
 from models.sasrec.batch_formation import NextItemBatchFormation
-from models.sasrec.metrics import (
-    compute_strata,
-    entropy_from_logits,
-    mrr_at_k,
-    ndcg_at_k,
-    recall_at_k,
-)
+from models.sasrec.metrics import MetricsAggregator
 from models.sasrec.model import SASRec
 
 KS = (10, 50, 100)
@@ -75,12 +69,7 @@ def evaluate(
     item_freq: dict[int, float],
 ) -> dict[str, float]:
     model.eval()
-    tail = {i for i, s in compute_strata(item_freq).items() if s == "tail"}
-    n, ent = 0, 0.0
-    sums = {f"{m}@{k}": 0.0 for m in ("recall", "ndcg", "mrr") for k in KS}
-    covered = {k: set() for k in KS}
-    tail_covered = {k: set() for k in KS}
-
+    metrics = MetricsAggregator(num_items, item_freq, KS)
     for batch in loader:
         mask = batch["targets"] >= 0
         if not mask.any():
@@ -92,24 +81,8 @@ def evaluate(
         )
         logits = model.score_all_items(user_emb)
         logits[:, 0] = float("-inf")  # PAD не рекомендуем
-        b = len(targets)
-        n += b
-        ent += entropy_from_logits(logits) * b
-        _, top = torch.topk(logits, max(KS), dim=1)
-        for k in KS:
-            sums[f"recall@{k}"] += recall_at_k(logits, targets, k) * b
-            sums[f"ndcg@{k}"] += ndcg_at_k(logits, targets, k) * b
-            sums[f"mrr@{k}"] += mrr_at_k(logits, targets, k) * b
-            for row in top[:, :k].tolist():
-                covered[k].update(row)
-                tail_covered[k].update(i for i in row if i in tail)
-
-    res = {name: v / max(n, 1) for name, v in sums.items()}
-    res["entropy"] = ent / max(n, 1)
-    for k in KS:
-        res[f"coverage@{k}"] = len(covered[k]) / max(num_items - 1, 1)
-        res[f"tail_coverage@{k}"] = len(tail_covered[k]) / max(len(tail), 1)
-    return res
+        metrics.update(logits, targets)
+    return metrics.compute()
 
 
 def main() -> None:
