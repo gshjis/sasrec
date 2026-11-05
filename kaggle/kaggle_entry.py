@@ -113,12 +113,16 @@ def run(cmd: list[str], cwd: Path, retry: int = 3) -> None:
 def clone_repo() -> None:
     """Этап 1: клон или pull репозитория."""
     if (REPO_DIR / ".git").exists():
+        run(["git", "checkout", "AI-refactoring"], cwd=REPO_DIR)
         run(["git", "pull", "--ff-only"], cwd=REPO_DIR)
     else:
         if REPO_DIR.exists():
             shutil.rmtree(REPO_DIR)
         run(
-            ["git", "clone", "--depth", "1", REPO_URL, str(REPO_DIR)],
+            [
+                "git", "clone", "--depth", "1", "--branch", "AI-refactoring",
+                REPO_URL, str(REPO_DIR),
+            ],
             cwd=WORK_DIR,
         )
 
