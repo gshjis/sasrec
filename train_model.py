@@ -322,7 +322,10 @@ def build_arg_parser() -> argparse.ArgumentParser:
     parser.add_argument("--dropout", type=float, default=0.5, help="Dropout")
     parser.add_argument("--lr", type=float, default=1e-3, help="Learning rate")
     parser.add_argument(
-        "--device", type=str, default="cpu", help="Устройство (cpu или cuda)"
+        "--device",
+        type=str,
+        default="auto",
+        help="Устройство: auto (cuda при наличии), cpu или cuda",
     )
     parser.add_argument(
         "--tail-quantile", type=float, default=0.5, help="Квантиль для хвоста"
@@ -366,11 +369,21 @@ def main() -> None:
     args = parser.parse_args()
 
     torch.manual_seed(args.seed)
-    device = torch.device(args.device)
 
     # Настройка логирования в указанную директорию
     log_dir = Path(args.log_dir)
     setup_logging(log_dir)
+
+    # Выбор устройства: auto -> cuda, если доступна
+    if args.device == "auto":
+        device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    else:
+        device = torch.device(args.device)
+    if device.type == "cuda":
+        torch.cuda.manual_seed_all(args.seed)
+        logger.info("GPU: %s", torch.cuda.get_device_name(device))
+    else:
+        logger.info("GPU недоступна, используется CPU")
 
     run_id = datetime.now().strftime("%Y%m%d_%H%M%S")
     logger.info(
@@ -387,7 +400,7 @@ def main() -> None:
         args.num_heads,
         args.dropout,
         args.lr,
-        args.device,
+        str(device),
     )
 
     # Условное скачивание данных, если обучающая/валидационная выборка отсутствует

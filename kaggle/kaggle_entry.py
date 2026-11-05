@@ -112,7 +112,7 @@ def main() -> None:
         "--batch-size",
         "256",
         "--device",
-        "cuda" if os.environ.get("KAGGLE_KERNEL_RUN_TYPE") else "cpu",
+        "auto",
     ]
 
     print("[STEP] Прогон 1/2: in-batch negatives без logQ", flush=True)
