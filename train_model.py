@@ -1,4 +1,4 @@
-"""Обучение SASRec: in-batch negatives, опциональная logQ, валидация full-sort."""
+"""Обучение SASRec: in-batch negatives, plain / standard logQ / improved logQ."""
 
 from __future__ import annotations
 
@@ -32,7 +32,18 @@ def train_epoch(
     optimizer: torch.optim.Optimizer,
     device: torch.device,
     item_freq: dict[int, float] | None,
+    logq_mode: str = "plain",
+    temperature: float = 1.0,
 ) -> float:
+    """Одна эпоха обучения.
+
+    logq_mode:
+      plain      — обычные in-batch negatives, cross-entropy по диагонали
+      standard   — стандартный logQ: −log Q вычитается из логитов целей
+      improved   — улучшенный logQ (Khrylchenko et al., RecSys'25):
+                   позитив не в знаменателе, вес w_up = sg(1 − P(p|u)),
+                   только негативы в знаменателе
+    """
     model.train()
     total, n_batches = 0.0, 0
     for batch in loader:
@@ -42,16 +53,52 @@ def train_epoch(
         input_ids = batch["input_ids"][mask].to(device)
         attention_mask = batch["attention_mask"][mask].to(device)
         targets = batch["targets"][mask].to(device)
+        b = len(targets)
 
         logits = model(input_ids, attention_mask) @ model.item_emb(targets).T
-        if item_freq is not None:
+        logits = logits / temperature
+
+        if logq_mode == "plain":
+            loss = F.cross_entropy(logits, torch.arange(b, device=device))
+
+        elif logq_mode == "standard":
+            assert item_freq is not None
             q = torch.tensor(
                 [max(item_freq.get(int(t), 1e-6), 1e-6) for t in targets.tolist()],
                 device=device,
             )
-            logits = logits - torch.log(q).unsqueeze(0)
+            log_q = torch.log(q).unsqueeze(0) / temperature  # [1, B]
+            logits = logits - log_q
+            loss = F.cross_entropy(logits, torch.arange(b, device=device))
 
-        loss = F.cross_entropy(logits, torch.arange(len(targets), device=device))
+        elif logq_mode == "improved":
+            assert item_freq is not None
+            q = torch.tensor(
+                [max(item_freq.get(int(t), 1e-6), 1e-6) for t in targets.tolist()],
+                device=device,
+            )
+            log_q = torch.log(q)  # [B]
+
+            pos_logits = torch.diag(logits)  # [B] — f(u_i, p_i) / T
+
+            # Знаменатель: только негативы (j != i), с коррекцией −log Q'(d_j)
+            neg_logits = logits - log_q.unsqueeze(0)  # [B, B]
+            off_diag = ~torch.eye(b, dtype=torch.bool, device=device)
+            neg_exp = torch.exp(neg_logits) * off_diag  # ноль на диагонали
+            denom = neg_exp.sum(dim=1)  # [B]
+
+            # Вес образца w_up = sg(1 − P_θ(p|u))
+            pos_exp = torch.exp(pos_logits)  # [B]
+            p_hat = pos_exp / (pos_exp + (1.0 / b) * denom + 1e-12)  # [B]
+            w_up = (1.0 - p_hat).detach()  # stop-gradient
+
+            log_prob = pos_logits - torch.log(denom + 1e-12)  # [B]
+            loss_per_example = -w_up * log_prob  # [B]
+            loss = loss_per_example.mean()
+
+        else:
+            raise ValueError(f"неизвестный logq_mode: {logq_mode}")
+
         optimizer.zero_grad()
         loss.backward()
         optimizer.step()
@@ -87,11 +134,22 @@ def evaluate(
 
 def main() -> None:
     p = argparse.ArgumentParser(
-        description="SASRec next-item: in-batch negatives ± logQ"
+        description="SASRec next-item: plain / standard logQ / improved logQ"
     )
     p.add_argument("--train-parquet", required=True)
     p.add_argument("--val-parquet", required=True)
-    p.add_argument("--logQ", action="store_true", help="logQ коррекция при обучении")
+    p.add_argument(
+        "--logq-mode",
+        choices=["plain", "standard", "improved"],
+        default="plain",
+        help="Режим обучения: plain (без коррекции), standard (logQ), improved (улучшенный logQ)",
+    )
+    p.add_argument(
+        "--temperature",
+        type=float,
+        default=1.0,
+        help="Температура для scaled softmax",
+    )
     p.add_argument("--epochs", type=int, default=5)
     p.add_argument("--batch-size", type=int, default=256)
     p.add_argument("--max-seq-len", type=int, default=50)
@@ -116,7 +174,12 @@ def main() -> None:
         if args.device == "auto"
         else torch.device(args.device)
     )
-    log.info("device=%s, logQ=%s", device, args.logQ)
+    log.info(
+        "device=%s, logq_mode=%s, temperature=%.3f",
+        device,
+        args.logq_mode,
+        args.temperature,
+    )
 
     # Данные: при отсутствии траб/вал файлов скачиваем сырые прослушивания с HF
     if not (Path(args.train_parquet).exists() and Path(args.val_parquet).exists()):
@@ -142,7 +205,7 @@ def main() -> None:
     num_items = tokenizer.vocab_size
     log.info("vocab=%d", num_items)
 
-    # Частоты айтемов: нужны для logQ и для хвоста/страт при валидации
+    # Частоты айтемов: нужны для logQ и для парето-метрик при валидации
     freqs = train_df.group_by("item_id").len()
     item_freq = {
         tokenizer.item_to_token[int(r["item_id"])]: r["len"] / train_df.height
@@ -163,7 +226,13 @@ def main() -> None:
 
     for epoch in range(1, args.epochs + 1):
         loss = train_epoch(
-            model, loaders["train"], optimizer, device, item_freq if args.logQ else None
+            model,
+            loaders["train"],
+            optimizer,
+            device,
+            item_freq if args.logq_mode != "plain" else None,
+            args.logq_mode,
+            args.temperature,
         )
         metrics = evaluate(model, loaders["val"], device, num_items, item_freq)
         log.info(
@@ -174,7 +243,15 @@ def main() -> None:
         )
         with open(log_dir / "metrics.jsonl", "a", encoding="utf-8") as f:
             f.write(
-                json.dumps({"epoch": epoch, "logQ": args.logQ, "loss": loss, **metrics})
+                json.dumps(
+                    {
+                        "epoch": epoch,
+                        "logq_mode": args.logq_mode,
+                        "temperature": args.temperature,
+                        "loss": loss,
+                        **metrics,
+                    }
+                )
                 + "\n"
             )
 

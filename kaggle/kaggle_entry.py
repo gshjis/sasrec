@@ -1,13 +1,14 @@
 """Точка входа для Kaggle ядра.
 
-Пробный прогон: 3 млн взаимодействий, 5 эпох, два режима (без logQ и с logQ).
+Пробный прогон: все взаимодействия, 5 эпох, три режима:
+plain (без коррекции), standard logQ, improved logQ с температурой 0.5.
 
 Шаги:
   1. Клонирует репозиторий проекта в /kaggle/working/repo.
   2. Ставит зависимости (torch на Kaggle уже есть).
   3. Скачивает данные Yambda 50m с Hugging Face.
-  4. Готовит 3M выборку с сессиями (scripts/prepare_3m.py).
-  5. Запускает обучение на 5 эпох дважды: без --logQ и с --logQ.
+  4. Готовит выборку с сессиями (scripts/prepare_3m.py).
+  5. Запускает обучение на 5 эпох трижды: plain / standard logQ / improved logQ (T=0.5).
 """
 
 from __future__ import annotations
@@ -80,7 +81,7 @@ def main() -> None:
             cwd=REPO_DIR,
         )
 
-    # 4. Подготовка 3M выборки с сессиями
+    # 4. Подготовка выборки с сессиями
     train_parquet = DATA_DIR / "processed" / "train_3m.parquet"
     val_parquet = DATA_DIR / "processed" / "val_3m.parquet"
     if not (train_parquet.exists() and val_parquet.exists()):
@@ -99,7 +100,7 @@ def main() -> None:
             cwd=REPO_DIR,
         )
 
-    # 5. Обучение: без logQ и с logQ
+    # 5. Обучение: три режима
     common = [
         "--train-parquet",
         str(train_parquet),
@@ -115,33 +116,52 @@ def main() -> None:
         "auto",
     ]
 
-    print("[STEP] Прогон 1/2: in-batch negatives без logQ", flush=True)
+    print("[STEP] Прогон 1/3: in-batch negatives без коррекции (plain)", flush=True)
     run(
         [
             sys.executable,
             "train_model.py",
             *common,
+            "--logq-mode",
+            "plain",
             "--log-dir",
-            str(WORK_DIR / "logs_no_logq"),
+            str(WORK_DIR / "logs_plain"),
         ],
         cwd=REPO_DIR,
     )
 
-    print("[STEP] Прогон 2/2: in-batch negatives с logQ", flush=True)
+    print("[STEP] Прогон 2/3: standard logQ", flush=True)
     run(
         [
             sys.executable,
             "train_model.py",
             *common,
+            "--logq-mode",
+            "standard",
             "--log-dir",
-            str(WORK_DIR / "logs_logq"),
-            "--logQ",
+            str(WORK_DIR / "logs_standard_logq"),
+        ],
+        cwd=REPO_DIR,
+    )
+
+    print("[STEP] Прогон 3/3: improved logQ, температура 0.5", flush=True)
+    run(
+        [
+            sys.executable,
+            "train_model.py",
+            *common,
+            "--logq-mode",
+            "improved",
+            "--temperature",
+            "0.5",
+            "--log-dir",
+            str(WORK_DIR / "logs_improved_logq"),
         ],
         cwd=REPO_DIR,
     )
 
     print(
-        "[DONE] Логи: /kaggle/working/logs_no_logq и /kaggle/working/logs_logq",
+        "[DONE] Логи: /kaggle/working/logs_plain, /kaggle/working/logs_standard_logq, /kaggle/working/logs_improved_logq",
         flush=True,
     )
 

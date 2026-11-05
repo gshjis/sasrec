@@ -9,17 +9,11 @@ import polars as pl
 class BuildSessionsConfig:
     """Конфигурация построения сессий по правому хвосту логнормального распределения gap."""
 
-    gap_std_threshold: float = 2.0  # число стандартных отклонений в лог-пространстве
-    min_played_ratio_pct: float = (
-        50.0  # фильтр прослушиваний (оставляем >= этого значения)
-    )
-    min_session_len: int = 10  # минимум событий в сессии
-    remove_time_outliers: bool = (
-        True  # удалять сессии длиннее верхнего уса боксплота по времени
-    )
-    time_outlier_multiplier: float = (
-        1.5  # множитель IQR для верхнего уса (1.5 = стандартный боксплот)
-    )
+    gap_std_threshold: float = 2.0
+    min_played_ratio_pct: float = 50
+    min_session_len: int = 10 
+    remove_time_outliers: bool = True 
+    time_outlier_multiplier: float = 1.5
     uid_column: str = "uid"
     timestamp_column: str = "timestamp"
     played_ratio_column: str = "played_ratio_pct"
