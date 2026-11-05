@@ -138,9 +138,11 @@ def main() -> None:
         ],
     )
     torch.manual_seed(42)
-    device = torch.device(args.device)
-    if args.device == "auto":
-        device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    device = (
+        torch.device("cuda" if torch.cuda.is_available() else "cpu")
+        if args.device == "auto"
+        else torch.device(args.device)
+    )
     log.info("device=%s, logQ=%s", device, args.logQ)
 
     # Данные: при отсутствии траб/вал файлов скачиваем сырые прослушивания с HF
