@@ -3,6 +3,7 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any
 
+import numpy as np
 import polars as pl
 import pyarrow.parquet as pq
 import torch
@@ -48,21 +49,32 @@ class _NextItemSeqDataset(Dataset):
             self._session_index[(uid, sid)] = (start, end)
             self._session_keys.append((uid, sid))
 
+        # Колонки айтемов и времени читаются с диска ОДИН раз и остаются
+        # в memory-mapped таблице: срез берётся без повторного чтения parquet.
+        self._columns = pq.read_table(
+            self.parquet_path,
+            columns=[item_column, sort_column],
+            memory_map=True,
+        )
+        self._items = self._columns.column(item_column)
+        self._timestamps = self._columns.column(sort_column)
+
     def __len__(self) -> int:
         return len(self._session_keys)
 
     def __getitem__(self, idx: int) -> dict[str, torch.Tensor]:
         uid, session_id = self._session_keys[idx]
         start, end = self._session_index[(uid, session_id)]
+        length_rows = end - start
 
-        session_df = pl.read_parquet(
-            self.parquet_path,
-            columns=[self.item_column, self.sort_column],
-        ).slice(start, end - start)
+        items = self._items.slice(start, length_rows).to_numpy(zero_copy_only=False)
+        timestamps = self._timestamps.slice(start, length_rows).to_numpy(
+            zero_copy_only=False
+        )
 
-        session_df = session_df.sort(self.sort_column)
-
-        item_ids = session_df[self.item_column].to_list()
+        # Внутри сессии события упорядочиваются по времени.
+        order = np.argsort(timestamps, kind="stable")
+        item_ids = items[order].astype(np.int64, copy=False).tolist()
 
         if len(item_ids) < 2:
             input_ids = torch.tensor([], dtype=torch.long)  # type: ignore[call-overload]

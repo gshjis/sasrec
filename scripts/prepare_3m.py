@@ -45,12 +45,24 @@ def main() -> None:
     )
     args = parser.parse_args()
 
-    print(f"Чтение {args.raw} ...")
-    # TODO: события в сыром файле НЕ отсортированы по времени — перед отсечением
-    # первых N взаимодействий нужна сортировка по timestamp, иначе выборка
-    # представляет весь период, а не начало истории.
-    dataset = pl.read_parquet(args.raw).head(args.interactions)
-    print(f"Взято взаимодействий: {dataset.height:,}")
+    # Сырые события НЕ отсортированы по времени: чтобы взять действительно
+    # первые N по timestamp, находим N-й по возрастанию момент времени
+    # и отбираем всё до него (сортировка уже после отбора).
+    print(f"Поиск границы для первых {args.interactions:,} событий по времени ...")
+    ts_sorted = pl.read_parquet(args.raw, columns=["timestamp"])["timestamp"].sort()
+    if args.interactions >= ts_sorted.len():
+        threshold = ts_sorted.max()
+    else:
+        threshold = ts_sorted.gather(args.interactions - 1)
+
+    dataset = (
+        pl.scan_parquet(args.raw)
+        .filter(pl.col("timestamp") <= threshold)  # type: ignore[operator]
+        .sort("timestamp")
+        .collect()
+        .head(args.interactions)
+    )
+    print(f"Взято взаимодействий по времени: {dataset.height:,}")
 
     ts = dataset["timestamp"]
     train_end = int(ts.quantile(0.70))  # type: ignore[reportArgumentType]
