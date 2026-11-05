@@ -46,6 +46,9 @@ def main() -> None:
     args = parser.parse_args()
 
     print(f"Чтение {args.raw} ...")
+    # TODO: события в сыром файле НЕ отсортированы по времени — перед отсечением
+    # первых N взаимодействий нужна сортировка по timestamp, иначе выборка
+    # представляет весь период, а не начало истории.
     dataset = pl.read_parquet(args.raw).head(args.interactions)
     print(f"Взято взаимодействий: {dataset.height:,}")
 
