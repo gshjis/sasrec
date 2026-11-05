@@ -100,4 +100,13 @@ class MetricsAggregator:
             res[f"pareto_tail_coverage@{k}"] = len(self.pareto_tail_covered[k]) / max(
                 len(self.pareto_tail), 1
             )
+            # Recall и NDCG по pareto стратам
+            for s in PARETO_STRATA:
+                count = self.pareto_counts[s]
+                if count > 0:
+                    res[f"pareto_{s}_recall@{k}"] = self.pareto_hits[k][s] / count
+                    res[f"pareto_{s}_ndcg@{k}"] = self.pareto_ndcg[k][s] / count
+                else:
+                    res[f"pareto_{s}_recall@{k}"] = 0.0
+                    res[f"pareto_{s}_ndcg@{k}"] = 0.0
         return res

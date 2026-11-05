@@ -119,7 +119,8 @@ def load_run_meta(path: Path | str) -> RunMeta:
 
 def new_run_meta(run_name: str, mode: str, seed: int | None = None,
                  args: dict[str, Any] | None = None,
-                 repo_dir: Path | None = None) -> RunMeta:
+                 repo_dir: Path | None = None,
+                 data_hash: str | None = None) -> RunMeta:
     """Создать новый RunMeta с заполненными полями окружения и git."""
     git = capture_git_info(repo_dir)
     env = capture_environment()
@@ -134,5 +135,6 @@ def new_run_meta(run_name: str, mode: str, seed: int | None = None,
         polars_version=env["polars"],
         seed=seed,
         args=args or {},
+        data_hash=data_hash,
         started_at=datetime.now(UTC).isoformat(),
     )

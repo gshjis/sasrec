@@ -52,6 +52,7 @@ from models.sasrec.model import SASRec
 from paths import BASE_DIR, DATA_DIR, ensure_dir
 from run_meta import (
     RunMeta,
+    compute_data_hash,
     new_run_meta,
     save_run_meta,
 )
@@ -284,7 +285,7 @@ def train_epoch(
                 [max(item_freq.get(int(t), 1e-6), 1e-6) for t in targets.tolist()],
                 device=device,
             )
-            log_q = torch.log(q)  # [B]
+            log_q = torch.log(q) / temperature  # [B]
 
             pos_logits = torch.diag(logits)  # [B] — f(u_i, p_i) / T
 
@@ -539,15 +540,6 @@ def main() -> int:
             cfg.train.seed,
         )
 
-        # RunMeta
-        meta = new_run_meta(
-            run_name=run_name,
-            mode=cfg.mode,
-            seed=cfg.train.seed,
-            args={k: v for k, v in vars(args).items() if v is not None},
-            repo_dir=BASE_DIR,
-        )
-
         # Данные
         train_parquet = Path(args.train_parquet) if args.train_parquet else None
         val_parquet = Path(args.val_parquet) if args.val_parquet else None
@@ -598,6 +590,17 @@ def main() -> int:
             train_df.height,
             val_df.height,
             test_df.height if test_df is not None else "нет",
+        )
+
+        # RunMeta с data_hash
+        data_hash = compute_data_hash(train_parquet)
+        meta = new_run_meta(
+            run_name=run_name,
+            mode=cfg.mode,
+            seed=cfg.train.seed,
+            args={k: v for k, v in vars(args).items() if v is not None},
+            repo_dir=BASE_DIR,
+            data_hash=data_hash,
         )
 
         # Токенизация по train-словарю

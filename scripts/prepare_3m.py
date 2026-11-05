@@ -2,8 +2,8 @@
 
 Шаги:
   1. Берёт первые N взаимодействий по времени из сырых прослушиваний.
-  2. Делит по временным меткам через gt_split (train / gap1 / val / gap2 / test).
-  3. Строит сессии отдельно внутри train, val и test (build_sessions).
+  2. Строит сессии на ВСЕМ отобранном наборе (сессии не разрезаются границами сплита).
+  3. Распределяет готовые сессии в train/val/test по времени их начала.
   4. Сохраняет train_3m.parquet, val_3m.parquet, test_3m.parquet с колонкой session_id.
   5. Пишет split_meta.json и fingerprint.json для воспроизводимости.
 
@@ -28,7 +28,6 @@ import polars as pl
 
 # Абсолютные пути, независимые от CWD
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
-from data_preprocessing.global_split import GTSSplitConfig, gt_split
 from data_preprocessing.session import BuildSessionsConfig, build_sessions
 from paths import DATA_DIR, PROCESSED_DIR, ensure_dir
 
@@ -133,11 +132,7 @@ def main() -> None:
         dataset = raw_df.sort(ts_col)
     log.info("Взято взаимодействий по времени: %d", dataset.height)
 
-    # Вычисляем границы сплита ПО ТОЛЬКО ОБУЧАЮЩЕЙ ЧАСТИ (без утечки будущего)
-    # Сначала определяем временной порог train_end как квантиль от всех данных
-    # (но без future — мы не знаем будущее на момент обучения, поэтому квантиль считается
-    #  по временным меткам до предполагаемого конца train).
-    # Для детерминированности используем долю train_share от общего временного диапазона.
+    # Вычисляем границы сплита по времени (линейная доля от времени)
     all_ts = dataset[ts_col]
     min_ts = int(all_ts.min())
     max_ts = int(all_ts.max())
@@ -145,40 +140,50 @@ def main() -> None:
 
     train_end = min_ts + int(time_span * args.train_share)
     val_end = train_end + int(time_span * args.val_share)
-    # test_end = max_ts (всё остальное)
 
     gap1_end = train_end + args.gap_seconds
     gap2_end = val_end + args.gap_seconds
 
-    split_cfg = GTSSplitConfig(
-        train_end=train_end,
-        gap1_end=gap1_end,
-        val_end=val_end,
-        gap2_end=gap2_end,
-    )
-    train, gap1, val, gap2, test = gt_split(dataset, split_cfg)
     log.info(
-        "Сплит по времени: train=%d, gap1=%d, val=%d, gap2=%d, test=%d",
-        train.height, gap1.height, val.height, gap2.height, test.height,
+        "Границы сплита: train_end=%d, gap1_end=%d, val_end=%d, gap2_end=%d",
+        train_end, gap1_end, val_end, gap2_end,
     )
 
-    # Сессии строятся отдельно внутри каждого сплита
+    # Строим сессии на ВСЕМ отобранном наборе — сессии не разрезаются границами сплита
     session_cfg = BuildSessionsConfig(seed=args.seed)
 
-    log.info("Построение сессий train ...")
-    train_sessions = build_sessions(train, config=session_cfg)
-    log.info("Построение сессий val ...")
-    val_sessions = build_sessions(val, config=session_cfg)
+    log.info("Построение сессий на всём наборе ...")
+    all_sessions = build_sessions(dataset, config=session_cfg)
+    log.info("Всего сессий: %d", all_sessions.group_by(["uid", "session_id"]).len().height)
+
+    # Определяем время начала каждой сессии для распределения в сплиты
+    session_bounds = (
+        all_sessions.group_by(["uid", "session_id"])
+        .agg(pl.col(ts_col).min().alias("session_start"))
+        .sort("session_start")
+    )
+
+    # Распределяем сессии в сплиты по времени начала сессии
+    train_sessions_ids = session_bounds.filter(
+        pl.col("session_start") < train_end
+    ).select(["uid", "session_id"])
+    val_sessions_ids = session_bounds.filter(
+        (pl.col("session_start") >= gap1_end) & (pl.col("session_start") < val_end)
+    ).select(["uid", "session_id"])
+    test_sessions_ids = session_bounds.filter(
+        pl.col("session_start") >= gap2_end
+    ).select(["uid", "session_id"])
+
+    train_sessions = all_sessions.join(train_sessions_ids, on=["uid", "session_id"], how="inner")
+    val_sessions = all_sessions.join(val_sessions_ids, on=["uid", "session_id"], how="inner")
 
     test_sessions = None
-    test_n = 0
     if args.with_test:
-        log.info("Построение сессий test ...")
-        test_sessions = build_sessions(test, config=session_cfg)
-        test_n = test_sessions.group_by(["uid", "session_id"]).len().height
+        test_sessions = all_sessions.join(test_sessions_ids, on=["uid", "session_id"], how="inner")
 
     train_n = train_sessions.group_by(["uid", "session_id"]).len().height
     val_n = val_sessions.group_by(["uid", "session_id"]).len().height
+    test_n = test_sessions.group_by(["uid", "session_id"]).len().height if test_sessions is not None else 0
 
     train_path = out_dir / "train_3m.parquet"
     val_path = out_dir / "val_3m.parquet"
@@ -202,7 +207,7 @@ def main() -> None:
             test_sessions.height, test_n, test_path,
         )
 
-    # split_meta.json — граница сплита, seed, хэш данных (только счётчики, без полных списков сессий)
+    # split_meta.json — граница сплита, seed, хэш данных
     split_meta = {
         "train_end": train_end,
         "gap1_end": gap1_end,
