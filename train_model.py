@@ -292,15 +292,17 @@ def train_epoch(
             # Знаменатель: только негативы (j != i), с коррекцией −log Q'(d_j)
             neg_logits = logits - log_q.unsqueeze(0)  # [B, B]
             off_diag = ~torch.eye(b, dtype=torch.bool, device=device)
-            neg_exp = torch.exp(neg_logits) * off_diag  # ноль на диагонали
-            denom = neg_exp.sum(dim=1)  # [B]
+            # Численно стабильный logsumexp: избегает overflow в exp() при больших логбитах
+            neg_logits_masked = neg_logits.masked_fill(~off_diag, float("-inf"))
+            log_denom = torch.logsumexp(neg_logits_masked, dim=1)  # [B]
+            denom = torch.exp(torch.clamp(log_denom, max=80.0))  # [B]
 
             # Вес образца w_up = sg(1 − P_θ(p|u))
-            pos_exp = torch.exp(pos_logits)  # [B]
+            pos_exp = torch.exp(torch.clamp(pos_logits, max=80.0))  # [B]
             p_hat = pos_exp / (pos_exp + (1.0 / b) * denom + 1e-12)  # [B]
             w_up = (1.0 - p_hat).detach()  # stop-gradient
 
-            log_prob = pos_logits - torch.log(denom + 1e-12)  # [B]
+            log_prob = pos_logits - log_denom  # [B] — стабильно, без log(denom)
             loss_per_example = -w_up * log_prob  # [B]
             loss = loss_per_example.mean()
 
@@ -309,6 +311,7 @@ def train_epoch(
 
         optimizer.zero_grad()
         loss.backward()
+        torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=5.0)  # защита от взрыва градиентов
         optimizer.step()
         total += float(loss.item())
         n_batches += 1

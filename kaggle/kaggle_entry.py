@@ -61,8 +61,8 @@ def parse_args() -> argparse.Namespace:
     )
     p.add_argument(
         "--logq-modes", nargs="*",
-        default=["plain", "standard", "improved"],
-        help="Режимы logQ для сравнения",
+        default=["improved"],
+        help="Режимы logQ для сравнения (по умолчанию только improved)",
     )
     p.add_argument(
         "--seed", type=int, default=42, help="Сид воспроизводимости",
