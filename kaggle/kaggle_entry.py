@@ -52,7 +52,7 @@ def parse_args() -> argparse.Namespace:
         "--epochs", type=int, default=20, help="Количество эпох"
     )
     p.add_argument(
-        "--temperature", type=float, default=0.5,
+        "--temperature", type=float, default=1.0,
         help="Единая температура для ВСЕХ режимов logQ",
     )
     p.add_argument(
@@ -61,8 +61,8 @@ def parse_args() -> argparse.Namespace:
     )
     p.add_argument(
         "--logq-modes", nargs="*",
-        default=["improved"],
-        help="Режимы logQ для сравнения (по умолчанию только improved)",
+        default=["plain", "standard", "improved"],
+        help="Режимы logQ для сравнения (по умолчанию все три)",
     )
     p.add_argument(
         "--seed", type=int, default=42, help="Сид воспроизводимости",
