@@ -128,12 +128,28 @@ def clone_repo() -> None:
 
 
 def install_deps() -> None:
-    """Этап 2: зависимости."""
+    """Этап 2: зависимости (с логгированием вывода pip)."""
     req = REPO_DIR / "requirements.txt"
-    run(
-        [sys.executable, "-m", "pip", "install", "-q", "-r", str(req)],
+    cmd = [sys.executable, "-m", "pip", "install", "-q", "-r", str(req)]
+    log.info("[CMD] %s", " ".join(cmd))
+    result = subprocess.run(
+        cmd,
         cwd=REPO_DIR,
+        capture_output=True,
+        text=True,
+        check=False,
+        env={**os.environ, "PYTHONPATH": str(REPO_DIR / "src")},
     )
+    if result.returncode != 0:
+        log.error("pip install вернул код %d", result.returncode)
+        if result.stderr:
+            for line in result.stderr.splitlines()[-50:]:
+                log.error("pip stderr: %s", line)
+        raise RuntimeError(f"pip install не удался (код {result.returncode})")
+    if result.stdout:
+        for line in result.stdout.splitlines()[-100:]:
+            log.info("pip: %s", line)
+    log.info("Зависимости установлены")
 
 
 def download_data(raw_dir: Path, retry: int) -> Path:
