@@ -45,18 +45,18 @@ def parse_args() -> argparse.Namespace:
     p.add_argument(
         "--mode",
         choices=["smoke", "full", "ablation"],
-        default="smoke",
+        default="full",
         help="Режим прогона",
     )
     p.add_argument(
-        "--epochs", type=int, default=2, help="Количество эпох"
+        "--epochs", type=int, default=20, help="Количество эпох"
     )
     p.add_argument(
-        "--temperature", type=float, default=1.0,
+        "--temperature", type=float, default=0.5,
         help="Единая температура для ВСЕХ режимов logQ",
     )
     p.add_argument(
-        "--interactions", type=int, default=3_000_000,
+        "--interactions", type=int, default=0,
         help="3_000_000 = смоук-прогон, 0 = все доступные взаимодействия",
     )
     p.add_argument(
