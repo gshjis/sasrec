@@ -7,6 +7,7 @@
 from __future__ import annotations
 
 import logging
+import sys
 import time
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
@@ -19,6 +20,20 @@ from paths import BASE_DIR, ensure_dir
 from run_meta import RunMeta, new_run_meta, save_run_meta
 
 log = logging.getLogger("pipeline")
+
+
+def setup_logging(log_dir: Path | None = None, level: int = logging.INFO) -> None:
+    """Настроить логирование для конвейера (файл + stdout)."""
+    handlers: list[logging.Handler] = [logging.StreamHandler(sys.stdout)]
+    if log_dir is not None:
+        log_dir = ensure_dir(log_dir)
+        handlers.append(logging.FileHandler(log_dir / "pipeline.log", encoding="utf-8"))
+    logging.basicConfig(
+        level=level,
+        format="%(asctime)s %(levelname)s %(name)s: %(message)s",
+        handlers=handlers,
+        force=True,
+    )
 
 
 class PipelineStage(Enum):
@@ -225,6 +240,7 @@ class Pipeline:
         retry: int = 3,
     ) -> list[PipelineResult]:
         """Последовательное выполнение этапов конвейера."""
+        setup_logging(self.run_dir)
         if stages is None:
             stages = [
                 PipelineStage.PREPARE,

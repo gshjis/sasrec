@@ -8,9 +8,11 @@
 from __future__ import annotations
 
 import json
-import sys
+import logging
 from pathlib import Path
 from typing import Any
+
+log = logging.getLogger("compare_runs")
 
 try:
     import pandas as pd
@@ -68,10 +70,7 @@ def collect_metrics(log_dirs: list[Path]) -> list[dict]:
         metrics_path = d / METRICS_FILENAME
 
         if not metrics_path.exists():
-            print(
-                f"[compare_runs] пропуск {d}: файл {METRICS_FILENAME} не найден",
-                file=sys.stderr,
-            )
+            log.warning("пропуск %s: файл %s не найден", d, METRICS_FILENAME)
             continue
 
         with metrics_path.open("r", encoding="utf-8") as f:
@@ -82,9 +81,8 @@ def collect_metrics(log_dirs: list[Path]) -> list[dict]:
                 try:
                     record: dict[str, Any] = json.loads(line)
                 except json.JSONDecodeError as exc:
-                    print(
-                        f"[compare_runs] пропуск строки {line_no} в {metrics_path}: {exc}",
-                        file=sys.stderr,
+                    log.warning(
+                        "пропуск строки %d в %s: %s", line_no, metrics_path, exc
                     )
                     continue
                 if not isinstance(record, dict):
@@ -186,26 +184,28 @@ def print_comparison_summary(df: pd.DataFrame) -> None:
     assert pd is not None
 
     if df.empty:
-        print("[compare_runs] Нет данных для сводки.")
+        log.info("Нет данных для сводки.")
         return
 
-    print("\n=== Сравнение запусков (последняя эпоха каждого run) ===\n")
+    log.info("\n=== Сравнение запусков (последняя эпоха каждого run) ===\n")
     try:
-        print(df.to_markdown(index=False))
-    except Exception:  # noqa: BLE001
-        print(df.to_string(index=False))
+        table = df.to_markdown(index=False)
+    except Exception:  # noqa: BLE001  # tabulate не установлен
+        table = df.to_string(index=False)
+    log.info(table)
 
     best = find_best_config(df, metric="recall@10")
     if best:
-        print(
-            "\nЛучшая конфигурация по recall@10: "
-            f"{best.get('run_name')} "
-            f"(epoch={best.get('epoch')}, "
-            f"logq_mode={best.get('logq_mode')}, "
-            f"temperature={best.get('temperature')}, "
-            f"recall@10={best.get('recall@10')})"
+        log.info(
+            "Лучшая конфигурация по recall@10: %s "
+            "(epoch=%s, logq_mode=%s, temperature=%s, recall@10=%s)",
+            best.get("run_name"),
+            best.get("epoch"),
+            best.get("logq_mode"),
+            best.get("temperature"),
+            best.get("recall@10"),
         )
-    print()
+    log.info("")
 
 
 def find_best_config(df: pd.DataFrame, metric: str = "recall@10") -> dict:
