@@ -52,7 +52,7 @@ def parse_args() -> argparse.Namespace:
         "--epochs", type=int, default=20, help="Количество эпох"
     )
     p.add_argument(
-        "--temperature", type=float, default=1.0,
+        "--temperature", type=float, default=1.5,
         help="Единая температура для ВСЕХ режимов logQ",
     )
     p.add_argument(
